@@ -3,7 +3,9 @@ services:
     name: lloyds-clone
     runtime: static
     branch: master
-    buildCommand: corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile && pnpm expo export --platform web
+    # `--prod=false` keeps devDependencies (babel, typescript) that the metro
+    # bundler needs even when Render sets NODE_ENV=production.
+    buildCommand: corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile --prod=false && pnpm run build:web
     staticPublishPath: ./dist
     pullRequestPreviewsEnabled: true
     buildFilter:
@@ -17,15 +19,20 @@ services:
       - key: EXPO_PUBLIC_API_URL
         sync: false
     headers:
+      # Bundles, fonts and images are content-hashed, so they can be cached hard.
       - path: /_expo/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
       - path: /assets/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
+      # The shell is not hashed and points at the current bundle.
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
     routes:
-      # Expo Router emits a static HTML file per route; fall back to the SPA
-      # entry for dynamic routes such as /details/[accountId].
+      # `web.output` is "single", so every route is served by the SPA shell.
+      # Without this, deep links such as /account/<id> would 404.
       - type: rewrite
         source: /*
         destination: /index.html
