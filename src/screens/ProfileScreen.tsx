@@ -3,15 +3,34 @@ import { CurrentUser } from "@/schema";
 import { useAuth } from "@/store";
 import { MaterialIcons, Octicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "expo-router";
+import { useRouter } from "expo-router";
+import { useRef } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+
+// Tapping the profile picture 5 times quickly opens the hidden customer panel.
+const TAPS_TO_OPEN = 5;
+const TAP_WINDOW_MS = 2000;
 
 const ProfileScreen = () => {
   const { logout } = useAuth();
+  const router = useRouter();
 
   const queryClient = useQueryClient();
 
   const user = queryClient.getQueryData<CurrentUser>(["current-user"]);
+
+  const tapCount = useRef(0);
+  const lastTap = useRef(0);
+
+  const handleAvatarTap = () => {
+    const now = Date.now();
+    tapCount.current = now - lastTap.current < TAP_WINDOW_MS ? tapCount.current + 1 : 1;
+    lastTap.current = now;
+    if (tapCount.current >= TAPS_TO_OPEN) {
+      tapCount.current = 0;
+      router.push("/(root)/(modals)/customer-panel");
+    }
+  };
 
   if (!user) {
     return (
@@ -32,18 +51,21 @@ const ProfileScreen = () => {
         contentContainerClassName="flex-grow gap-y-5"
         showsVerticalScrollIndicator={false}
       >
-        <Text className="font-semibold">Your details</Text>
-
-        <Link href="/(root)/(modals)/customer-panel" asChild>
-          <Pressable className="flex-row items-center rounded-xl bg-black px-3 py-4 active:opacity-80">
-            <MaterialIcons name="manage-accounts" size={22} color="white" />
-            <Text className="ml-3 font-semibold text-white">
-              Manage account
+        {/* Profile picture — tap it 5 times to open the customer panel. */}
+        <View className="items-center gap-y-2">
+          <Pressable
+            onPress={handleAvatarTap}
+            className="h-24 w-24 items-center justify-center rounded-full bg-[#12b77b] active:opacity-90"
+          >
+            <Text className="text-3xl font-semibold text-white">
+              {user.firstName?.[0]?.toUpperCase() ?? "U"}
+              {user.lastName?.[0]?.toUpperCase() ?? ""}
             </Text>
-            <View className="flex-1" />
-            <Octicons name="chevron-right" size={20} color="white" />
           </Pressable>
-        </Link>
+          <Text className="font-semibold">{user.fullName}</Text>
+        </View>
+
+        <Text className="font-semibold">Your details</Text>
 
         <View className="gap-y-1 rounded-xl bg-white px-3 py-4">
           <Text className="text-sm text-gray-600">Name and title:</Text>

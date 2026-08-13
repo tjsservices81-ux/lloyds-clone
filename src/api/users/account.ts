@@ -29,3 +29,31 @@ export async function generateTransactions(input: {
   );
   return response.data as { ok: boolean; created: number };
 }
+
+/** Set an account's balance directly. */
+export async function setAccountBalance(input: {
+  accountId: string;
+  balance: number;
+}) {
+  const response = await privateClient().patch(
+    `users/accounts/${input.accountId}/balance`,
+    { balance: input.balance },
+  );
+  return response.data as { ok: boolean; balance: number };
+}
+
+/** Delete a single transaction. */
+export async function deleteTransaction(transactionId: string) {
+  const response = await privateClient().delete(
+    `users/transactions/${transactionId}`,
+  );
+  return response.data as { ok: boolean };
+}
+
+/** Clear all transactions for an account. */
+export async function clearTransactions(accountId: string) {
+  const response = await privateClient().delete(
+    `users/accounts/${accountId}/transactions`,
+  );
+  return response.data as { ok: boolean };
+}

@@ -1,22 +1,27 @@
 import {
   changePassword,
+  clearTransactions,
+  deleteTransaction,
   generateTransactions,
+  setAccountBalance,
   updateProfile,
 } from "@/api/users/account";
 import { Button } from "@/components/ui";
 import { FaceIdSection } from "@/components/customer-panel/FaceIdSection";
+import { useAccountTransactionsQuery } from "@/hooks/query/useAccountTransactionsQuery";
 import {
   AccountQueryKey,
   TransactionQueryKey,
   UserQueryKey,
 } from "@/libs/query-keys";
-import { cn } from "@/libs/utils";
+import { cn, formatCurrency } from "@/libs/utils";
 import { GetAllAccountSchema } from "@/schema";
 import { useAccountsQuery, useUserQuery } from "@/hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Feather } from "@expo/vector-icons";
 import { Stack } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 const Field = ({
   label,
@@ -31,7 +36,7 @@ const Field = ({
   onChangeText: (v: string) => void;
   placeholder?: string;
   secure?: boolean;
-  keyboardType?: "default" | "numeric";
+  keyboardType?: "default" | "numeric" | "decimal-pad";
 }) => (
   <View className="gap-y-1">
     <Text className="text-sm text-gray-600">{label}</Text>
@@ -73,7 +78,29 @@ export default function CustomerPanel() {
   const { accountsQuery } = useAccountsQuery({ accounts: { enabled: true } });
   const accounts = (accountsQuery.data ?? []) as GetAllAccountSchema;
 
-  // Profile
+  const [status, setStatus] = useState<string | null>(null);
+
+  // Shared account selection used by balance / history / generate tools.
+  const [accountId, setAccountId] = useState<string>("");
+  useEffect(() => {
+    if (!accountId && accounts.length) setAccountId(accounts[0].id);
+  }, [accounts, accountId]);
+  const selectedAccount = useMemo(
+    () => accounts.find((a) => a.id === accountId),
+    [accounts, accountId],
+  );
+
+  const invalidateAccount = () => {
+    queryClient.invalidateQueries({
+      queryKey: TransactionQueryKey.transactions(accountId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: AccountQueryKey.userAccount(accountId),
+    });
+    queryClient.invalidateQueries({ queryKey: ["accounts"] });
+  };
+
+  // ---- Profile ----
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   useEffect(() => {
@@ -82,20 +109,6 @@ export default function CustomerPanel() {
       setEmail(user.email);
     }
   }, [user]);
-
-  // Password
-  const [newPassword, setNewPassword] = useState("");
-
-  // Generate transactions
-  const [accountId, setAccountId] = useState<string>("");
-  const [from, setFrom] = useState(monthsAgoISO(3));
-  const [to, setTo] = useState(todayISO());
-  const [count, setCount] = useState("15");
-  useEffect(() => {
-    if (!accountId && accounts.length) setAccountId(accounts[0].id);
-  }, [accounts, accountId]);
-
-  const [status, setStatus] = useState<string | null>(null);
 
   const profileMutation = useMutation({
     mutationFn: () => updateProfile({ name, email }),
@@ -106,6 +119,8 @@ export default function CustomerPanel() {
     onError: () => setStatus("Could not update profile"),
   });
 
+  // ---- Password ----
+  const [newPassword, setNewPassword] = useState("");
   const passwordMutation = useMutation({
     mutationFn: () => changePassword({ newPassword }),
     onSuccess: () => {
@@ -115,6 +130,47 @@ export default function CustomerPanel() {
     onError: () => setStatus("Could not change password (min 6 characters)"),
   });
 
+  // ---- Balance ----
+  const [balanceInput, setBalanceInput] = useState("");
+  useEffect(() => {
+    if (selectedAccount) setBalanceInput(String(selectedAccount.balance));
+  }, [selectedAccount]);
+
+  const balanceMutation = useMutation({
+    mutationFn: () =>
+      setAccountBalance({ accountId, balance: Number(balanceInput) }),
+    onSuccess: (res) => {
+      invalidateAccount();
+      setStatus(`Balance set to ${formatCurrency(res.balance)}`);
+    },
+    onError: () => setStatus("Could not set balance"),
+  });
+
+  // ---- Transactions (list + delete) ----
+  const { data: txns } = useAccountTransactionsQuery(accountId);
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteTransaction(id),
+    onSuccess: () => {
+      invalidateAccount();
+      setStatus("Transaction deleted");
+    },
+    onError: () => setStatus("Could not delete transaction"),
+  });
+
+  const clearMutation = useMutation({
+    mutationFn: () => clearTransactions(accountId),
+    onSuccess: () => {
+      invalidateAccount();
+      setStatus("All transactions cleared");
+    },
+    onError: () => setStatus("Could not clear transactions"),
+  });
+
+  // ---- Generate ----
+  const [from, setFrom] = useState(monthsAgoISO(3));
+  const [to, setTo] = useState(todayISO());
+  const [count, setCount] = useState("15");
   const generateMutation = useMutation({
     mutationFn: () =>
       generateTransactions({
@@ -124,22 +180,11 @@ export default function CustomerPanel() {
         count: Number(count) || 15,
       }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({
-        queryKey: TransactionQueryKey.transactions(accountId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: AccountQueryKey.userAccount(accountId),
-      });
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      invalidateAccount();
       setStatus(`Generated ${res.created} transactions`);
     },
     onError: () => setStatus("Could not generate transactions"),
   });
-
-  const selectedName = useMemo(
-    () => accounts.find((a) => a.id === accountId)?.accountName,
-    [accounts, accountId],
-  );
 
   return (
     <ScrollView
@@ -189,10 +234,8 @@ export default function CustomerPanel() {
 
       <FaceIdSection savedUserId={user?.userId ?? null} onStatus={setStatus} />
 
-      <Card title="Generate transaction history">
-        <Text className="text-xs text-gray-500">
-          Create random transactions for an account between two dates.
-        </Text>
+      {/* Account picker shared by the tools below */}
+      <Card title="Account">
         <View className="flex-row flex-wrap gap-2">
           {accounts.map((a) => (
             <Text
@@ -207,6 +250,81 @@ export default function CustomerPanel() {
             </Text>
           ))}
         </View>
+        {selectedAccount && (
+          <Text className="text-sm text-gray-600">
+            Current balance: {formatCurrency(selectedAccount.balance)}
+          </Text>
+        )}
+      </Card>
+
+      <Card title="Set balance">
+        <Field
+          label="New balance (£)"
+          value={balanceInput}
+          onChangeText={setBalanceInput}
+          keyboardType="decimal-pad"
+        />
+        <Button
+          label="Set balance"
+          onPress={() => balanceMutation.mutate()}
+          disabled={balanceMutation.isPending || !accountId}
+        />
+      </Card>
+
+      <Card title="Transactions">
+        <View className="flex-row items-center justify-between">
+          <Text className="text-xs text-gray-500">
+            {txns?.length ?? 0} transaction(s)
+          </Text>
+          <Pressable
+            onPress={() => clearMutation.mutate()}
+            disabled={clearMutation.isPending || !(txns?.length)}
+            className="rounded-lg bg-red-600 px-3 py-2 active:opacity-80 disabled:opacity-40"
+          >
+            <Text className="text-sm font-semibold text-white">Clear all</Text>
+          </Pressable>
+        </View>
+        <View className="gap-y-2">
+          {(txns ?? []).slice(0, 40).map((t) => (
+            <View
+              key={t.id}
+              className="flex-row items-center gap-x-2 border-b-hairline border-gray-200 py-2"
+            >
+              <View className="flex-1">
+                <Text className="text-sm font-medium">{t.payee.name}</Text>
+                <Text className="text-xs text-gray-400">
+                  {new Date(t.date).toDateString()}
+                </Text>
+              </View>
+              <Text
+                className={cn(
+                  "text-sm",
+                  t.type === "deposit" && "text-green-700",
+                )}
+              >
+                {t.type === "deposit" ? "+ " : "- "}
+                {formatCurrency(Math.abs(t.amount))}
+              </Text>
+              <Pressable
+                onPress={() => deleteMutation.mutate(t.id)}
+                className="rounded-full bg-red-100 p-2 active:opacity-70"
+              >
+                <Feather name="trash-2" size={16} color="#b91c1c" />
+              </Pressable>
+            </View>
+          ))}
+          {(txns?.length ?? 0) === 0 && (
+            <Text className="py-4 text-center text-sm text-gray-400">
+              No transactions
+            </Text>
+          )}
+        </View>
+      </Card>
+
+      <Card title="Generate transaction history">
+        <Text className="text-xs text-gray-500">
+          Create random transactions between two dates for the selected account.
+        </Text>
         <View className="flex-row gap-x-3">
           <View className="flex-1">
             <Field label="From" value={from} onChangeText={setFrom} placeholder="YYYY-MM-DD" />
@@ -222,7 +340,7 @@ export default function CustomerPanel() {
           keyboardType="numeric"
         />
         <Button
-          label={`Generate for ${selectedName ?? "account"}`}
+          label={`Generate for ${selectedAccount?.accountName ?? "account"}`}
           onPress={() => generateMutation.mutate()}
           disabled={generateMutation.isPending || !accountId}
         />

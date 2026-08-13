@@ -137,6 +137,82 @@ usersRouter.post(
   },
 );
 
+// Set an account's balance directly (simulation tool).
+usersRouter.patch(
+  "/users/accounts/:accountId/balance",
+  requireAuth,
+  async (req, res) => {
+    const balance = Number(req.body?.balance);
+    if (!Number.isFinite(balance)) {
+      return res.status(400).json({ message: "A numeric balance is required" });
+    }
+
+    const [account] = await db
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.id, String(req.params.accountId)),
+          eq(accounts.customerId, req.customerId!),
+        ),
+      )
+      .limit(1);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+
+    await db
+      .update(accounts)
+      .set({ balance: balance.toFixed(2), updatedAt: new Date() })
+      .where(eq(accounts.id, account.id));
+
+    return res.json({ ok: true, balance: Number(balance.toFixed(2)) });
+  },
+);
+
+// Delete a single transaction the customer owns.
+usersRouter.delete(
+  "/users/transactions/:transactionId",
+  requireAuth,
+  async (req, res) => {
+    const [txn] = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .innerJoin(accounts, eq(accounts.id, transactions.accountId))
+      .where(
+        and(
+          eq(transactions.id, String(req.params.transactionId)),
+          eq(accounts.customerId, req.customerId!),
+        ),
+      )
+      .limit(1);
+    if (!txn) return res.status(404).json({ message: "Transaction not found" });
+
+    await db.delete(transactions).where(eq(transactions.id, txn.id));
+    return res.json({ ok: true });
+  },
+);
+
+// Clear an account's entire transaction history.
+usersRouter.delete(
+  "/users/accounts/:accountId/transactions",
+  requireAuth,
+  async (req, res) => {
+    const [account] = await db
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.id, String(req.params.accountId)),
+          eq(accounts.customerId, req.customerId!),
+        ),
+      )
+      .limit(1);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+
+    await db.delete(transactions).where(eq(transactions.accountId, account.id));
+    return res.json({ ok: true });
+  },
+);
+
 usersRouter.get("/users/me", requireAuth, async (req, res) => {
   const [customer] = await db
     .select()
