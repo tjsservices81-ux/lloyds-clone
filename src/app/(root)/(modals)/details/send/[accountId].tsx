@@ -62,11 +62,9 @@ type BankDetailsCardProps = {
     }
 );
 
-const BankDetailsCard = ({
-  holderName,
-  type,
-  ...props
-}: BankDetailsCardProps) => {
+const BankDetailsCard = (props: BankDetailsCardProps) => {
+  const { holderName, type } = props;
+
   return (
     <View className="mx-3 gap-y-5 rounded-md border border-blue-600 bg-purple-100/50 p-4">
       <View className="gap-y-2">

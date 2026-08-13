@@ -1,6 +1,11 @@
 # Lloyds Clone
 
-This project is a clone of the Lloyds banking application, built using React Native and TypeScript. It includes various features such as authentication, creating a new payee, viewing account details, and making payments.
+This project is a clone of the Lloyds banking application. The UI is built with
+Expo / React Native (and runs on the web via React Native Web); it is backed by
+its own **Node + Express + PostgreSQL** API in this same repository. All banking
+data is **simulated** — no real bank, no real money.
+
+> This is a training/simulation app. Everything is fake data.
 
 ## Screenshots
 
@@ -14,78 +19,172 @@ More in the screenshot folder. [Screenshot](./screenshots/)
 
 ## Features
 
-- Authentiication
-- Create a new payee
-- View account details
-- Make payments
+- Authentication (JWT access + refresh tokens)
+- **Persistent, device-bound login** — the User ID is remembered on the device
+  and you only type your password; the credentials are locked to the phone that
+  opened the invite link (rejected elsewhere)
+- **Face ID sign-in** (WebAuthn passkey) as an alternative to the password
+- Real account balances stored in PostgreSQL
+- Sending money that actually moves the balance and shows in transaction history
+- Create / list / delete payees
+- **Customer panel** — change name, email and password (staying signed in), set
+  up Face ID, and generate random transaction history between two dates
 - Card management
+- In-app support chat (Claude-powered, with a scripted fallback)
+- Staff admin dashboard: auto-generate customers (random User ID + password,
+  "New Customer" name, generated email) and one-time invite links
+- One-time invite links and an access-code gate
 
-## Technologies Used
+### Persistent login, device binding & Face ID
 
-- Expo
-- Expo Router
-- React Native
-- TypeScript
-- Nativewind
-- React Hook Form
-- Zod
-- Tanstack Query
-- Axios
-- TabView
+- Customers are created from the admin dashboard with everything auto-generated.
+  The customer opens the invite link on their phone, which **locks the account
+  to that device**. From then on the User ID + password (or Face ID) only work
+  on that device.
+- The app remembers the User ID on the device and does not persist the session,
+  so it always reopens on the login screen with the User ID filled in — the
+  customer just types their password (or uses Face ID).
+- Face ID uses the WebAuthn platform authenticator, so it needs a secure context
+  (HTTPS in production, which Render provides; `localhost` also works in dev).
+
+## Architecture
+
+One repository, two halves, plus a shared database schema — the same
+single-service model the app deploys as:
+
+- `src/` — the Expo / React Native (Web) client
+- `server/` — the Express API and server-rendered admin pages
+- `shared/schema.ts` — the Drizzle ORM database schema used by the server
+
+In production, **one** Express process serves both the built web client and the
+`/api` on a single port. The client is same-origin, so it calls `/api` directly.
+
+### Technologies
+
+- **Client:** Expo, Expo Router, React Native / React Native Web, TypeScript,
+  NativeWind, React Hook Form, Zod, TanStack Query, Axios
+- **Server:** Node, Express, PostgreSQL, Drizzle ORM, JSON Web Tokens, bcrypt
 
 ## Getting started
 
 ### Prerequisites
 
-- Node.js
-- pnpm
-- Expo CLI
-- [Lloyds API Clone](https://github.com/amilmohd155/lloyds-clone-api)
+- Node.js 20+ and pnpm
+- A PostgreSQL database (local, Render, or Neon — the server auto-detects the
+  driver)
 
-#### API Express Project
+### 1. Install and configure
 
-Check out this repo to run the express server. ([Express API](https://github.com/amilmohd155/lloyds-clone-api))
+```sh
+pnpm install
+cp .env.example .env          # then set DATABASE_URL (and JWT_SECRET)
+```
 
-#### Environment Variables
+### 2. Create the tables and seed demo data
 
-To run this project, you will need to add the following environment variables to your .env file
+```sh
+pnpm db:push                  # create the tables from shared/schema.ts
+pnpm db:seed                  # optional; the server also seeds on first start
+```
 
-`EXPO_PUBLIC_API_URL` - http://localhost:1205 / http://IP:1205 where the express app mentioned above is running, if port was changed, make appropriate changes.
+The seed creates a demo login:
 
-### Installation
+| User ID     | Password   |
+| ----------- | ---------- |
+| `docren155` | `password` |
 
-1. Clone the repository:
-   ```sh
-   git clone https://github.com/your-username/lloyds-clone.git
-   ```
-2. Navigate to the project directory:
-   ```sh
-   cd lloyds-clone
-   ```
-3. Install dependencies:
-   ```sh
-   pnpm install
-   ```
+### 3. Run it
 
-### Running the App
+The simplest way (mirrors production): build the web client, then start the
+server, which serves both the client and the API on one port.
 
-1. Start the Expo development server:
+```sh
+pnpm build:web                # writes the web client to dist/
+pnpm dev:server               # API + client on http://localhost:5000
+```
 
-   ```sh
-   pnpm start
-   ```
+Open http://localhost:5000 and log in with the demo credentials.
 
-2. Use the Expo app on your mobile device or an emulator to scan the QR code and run the application.
+For native development, `pnpm start` (Expo) still works; point
+`EXPO_PUBLIC_API_URL` at your running server.
+
+### Staff dashboard
+
+Visit `/admin-oversight` and enter `ADMIN_PIN` (default `246810`) to create
+customers and generate invite links.
+
+## Web build
+
+The client is a single-page web app (`web.output` is `single` in `app.json`).
+`pnpm build:web` writes it to `dist/`, and the Express server serves that folder
+with an SPA fallback (so deep links such as `/account/<id>` resolve). For a
+same-origin deploy, `EXPO_PUBLIC_API_URL` is left empty so the client calls
+`/api` on its own host; it is inlined at **build** time, not read at runtime.
+
+### Web-specific implementations
+
+Some native modules have no browser build, so the web bundle substitutes them:
+
+| Native module                                       | Web replacement                        |
+| --------------------------------------------------- | -------------------------------------- |
+| `react-native-pager-view`                           | `src/web/pager-view.tsx`               |
+| `@react-native-segmented-control/segmented-control` | `src/web/segmented-control.tsx`        |
+| `@react-native-community/datetimepicker`            | `src/components/ui/DateTimePicker.web.tsx` (`<input type="date">`) |
+| `expo-secure-store`                                 | `src/store/storage.web.ts` (`localStorage`) |
+
+The first two are swapped by a `resolveRequest` alias in `metro.config.js`; the
+others resolve through metro's `.web` file extension. Native builds are
+unaffected and keep using the original modules.
+
+Note that persisted auth tokens live in `localStorage` on web — the browser has
+no secure-storage equivalent of the iOS keychain / Android keystore.
+
+## Environment variables
+
+| Name                 | Purpose                                                                   |
+| -------------------- | ------------------------------------------------------------------------- |
+| `DATABASE_URL`       | **Required.** PostgreSQL connection string. The app won't start without it. |
+| `JWT_SECRET`         | Signs access tokens. Required in production; a dev fallback is used locally. |
+| `APP_ACCESS_CODE`    | Code for the access gate (`/api/check-access`). Default `LLOYDS777777`.   |
+| `ADMIN_PIN`          | PIN for the `/admin-oversight` staff dashboard. Default `246810`.         |
+| `ANTHROPIC_API_KEY`  | Optional. Enables the Claude-powered chat; scripted replies without it.   |
+| `ANTHROPIC_MODEL`    | Optional. Chat model id (default `claude-sonnet-5`).                       |
+| `EXPO_PUBLIC_API_URL`| Client → API base URL. Empty for a same-origin deploy. Baked in at build. |
+| `PORT`               | Port the server listens on (the host usually sets this).                  |
+
+## Deploying to Render
+
+`render.yaml` is a Render blueprint describing **one web service + a managed
+PostgreSQL database**. The web service builds the client, bundles the server,
+pushes the schema, and serves everything on one port.
+
+1. In Render, create a new **Blueprint** from this repository.
+2. When prompted, set `APP_ACCESS_CODE` and `ADMIN_PIN` (and optionally
+   `ANTHROPIC_API_KEY`). `DATABASE_URL` and `JWT_SECRET` are wired up
+   automatically by the blueprint.
+3. Deploy. On first boot the server seeds the demo customer.
+
+Notes:
+
+- The bundled free PostgreSQL plan expires after ~30 days — switch the database
+  to a paid plan for anything long-lived.
+- Because the client and API are the same origin, there is **no CORS or mixed
+  content** to configure.
 
 ## Project Structure
 
-- `src/`: Contains the source code of the application
-  - `api/`: API calls and services
-  - `components/`: Reusable UI components
-  - `libs/`: Utility functions and libraries
-  - `schema/`: Form validation schemas
-  - `screens/`: Application screens
-  - `app/`: Main application logic and routing
+- `src/`: the client
+  - `api/`: HTTP clients and API calls
+  - `components/`: reusable UI components
+  - `libs/`: utilities
+  - `schema/`: form + response validation schemas (Zod)
+  - `screens/`: application screens
+  - `app/`: routing (Expo Router)
+  - `web/`: browser implementations of native-only modules
+- `server/`: the Express API
+  - `routes/`: session, users, accounts, transactions, chat, admin, invite, access
+  - `db.ts`, `auth.ts`, `seed.ts`, `serializers.ts`, `index.ts`
+- `shared/schema.ts`: the Drizzle database schema
 
 ## License
 

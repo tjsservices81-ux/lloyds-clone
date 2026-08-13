@@ -61,6 +61,9 @@ export default function TabLayout() {
         },
 
         tabBarActiveTintColor: "#000000",
+        // React Navigation moves labels beside the icons on wide viewports,
+        // which the phone-width web shell has no room for.
+        tabBarLabelPosition: "below-icon",
       })}
     >
       <Tabs.Screen name="index" options={{ href: null }} />

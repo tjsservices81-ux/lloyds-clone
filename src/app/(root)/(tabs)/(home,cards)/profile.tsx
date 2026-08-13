@@ -12,7 +12,6 @@ export default function Page() {
   return (
     <View className="flex-1 px-4 pt-5">
       <Stack.Screen
-        name="support"
         options={{
           title: "Profile and settings",
           header: (props) => <Header showBack showSupport {...props} />,

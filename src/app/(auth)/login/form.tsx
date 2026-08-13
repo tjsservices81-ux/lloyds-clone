@@ -2,12 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text, View } from "react-native";
 import { useForm, SubmitHandler } from "react-hook-form";
 import { Button, TextInput } from "@/components/ui";
+import { FaceIdSignIn } from "@/components/auth/FaceIdSignIn";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link } from "expo-router";
 import { type LoginForm, loginFormSchema } from "@/schema";
 import { useAuth } from "@/store";
 
 const Page = () => {
+  const savedUserId = useAuth((state) => state.savedUserId);
+
   const {
     control,
     handleSubmit,
@@ -16,8 +19,10 @@ const Page = () => {
     resolver: zodResolver(loginFormSchema),
     mode: "onChange",
     defaultValues: {
-      userId: "docren155",
-      password: "password",
+      // Persistent login: the User ID is remembered on this device, so the
+      // customer only needs to type their password.
+      userId: savedUserId ?? "",
+      password: "",
     },
   });
 
@@ -59,6 +64,7 @@ const Page = () => {
             size="lg"
             onPress={handleSubmit(onSubmit)}
           />
+          <FaceIdSignIn />
           <Link asChild href="/(auth)/forgot-password">
             <Button
               variant="link"

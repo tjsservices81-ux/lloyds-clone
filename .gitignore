@@ -9,6 +9,12 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Server build output / local runtime
+server-dist/
+.server-bundle.cjs
+/data/
+drizzle/
+
 # Native
 *.orig.*
 *.jks
@@ -30,6 +36,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript

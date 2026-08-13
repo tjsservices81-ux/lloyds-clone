@@ -1,0 +1,51 @@
+# Render blueprint: the Lloyds clone as a full-stack app — one Node web service
+# that serves both the built web client and the /api, plus a managed PostgreSQL
+# database. This mirrors the Bank of Ireland clone's single-service model.
+#
+# On first deploy, Render will provision the database, build the client, push
+# the Drizzle schema, and start the server (which seeds demo data if empty).
+
+databases:
+  - name: lloyds-db
+    databaseName: lloyds
+    user: lloyds
+    # Free Postgres is fine for a demo but expires after ~30 days — switch to a
+    # paid plan (e.g. basic-256mb) for anything long-lived.
+    plan: free
+
+services:
+  - type: web
+    name: lloyds-clone
+    runtime: node
+    plan: free
+    branch: master
+    # Install (keeping devDeps for the build), build the web client + bundle the
+    # server, then push the database schema. EXPO_PUBLIC_API_URL is baked into
+    # the client here, so it must be set at build time (see envVars below).
+    buildCommand: corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile --prod=false && pnpm run build && pnpm run db:push
+    startCommand: pnpm run start:server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.11.0
+      - key: NODE_ENV
+        value: production
+      # Same-origin API: an empty value makes the client call "/api" on its own host.
+      - key: EXPO_PUBLIC_API_URL
+        value: ""
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lloyds-db
+          property: connectionString
+      # Signs access tokens; Render generates a strong value once and keeps it.
+      - key: JWT_SECRET
+        generateValue: true
+      # Set these in the Render dashboard (declared sync:false so they're prompted).
+      - key: APP_ACCESS_CODE
+        sync: false
+      - key: ADMIN_PIN
+        sync: false
+      # Optional: enables the Claude-powered support chat. Without it, chat uses
+      # scripted replies.
+      - key: ANTHROPIC_API_KEY
+        sync: false

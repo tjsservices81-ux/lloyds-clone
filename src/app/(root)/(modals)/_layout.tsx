@@ -27,6 +27,15 @@ export default function Layout() {
             ),
           }}
         />
+        <Stack.Screen
+          name="customer-panel"
+          options={{
+            title: "Manage account",
+            header: (props) => (
+              <Header showClose {...props} useSafeArea={false} />
+            ),
+          }}
+        />
         <Stack.Screen name="(payment)" options={{ headerShown: false }} />
       </Stack>
     </>
