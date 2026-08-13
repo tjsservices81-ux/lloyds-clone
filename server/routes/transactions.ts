@@ -10,7 +10,7 @@
  * can never leave the balance and the history out of step.
  */
 import { Router } from "express";
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { db } from "../db";
 import { accounts, transactions } from "../../shared/schema";
 import { requireAuth } from "../auth";
@@ -18,6 +18,51 @@ import { serializeTransaction } from "../serializers";
 import { timelineForAccount } from "../timeline";
 
 export const transactionsRouter = Router();
+
+// Returns an account's transactions in the shape the account screen renders,
+// with a running balance computed from the account's current balance.
+transactionsRouter.get("/transactions/:accountId", requireAuth, async (req, res) => {
+  const [account] = await db
+    .select()
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.id, String(req.params.accountId)),
+        eq(accounts.customerId, req.customerId!),
+      ),
+    )
+    .limit(1);
+  if (!account) return res.status(404).json({ message: "Account not found" });
+
+  const rows = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.accountId, account.id))
+    .orderBy(asc(transactions.createdAt));
+
+  const total = rows.reduce((sum, r) => sum + Number.parseFloat(r.amount), 0);
+  let running = Number.parseFloat(account.balance) - total; // opening balance
+
+  const items = rows.map((r) => {
+    const amount = Number.parseFloat(r.amount);
+    running += amount;
+    return {
+      id: r.id,
+      amount,
+      balanceAfter: Number(running.toFixed(2)),
+      date: r.createdAt.toISOString(),
+      type: amount >= 0 ? "deposit" : "withdrawal",
+      payee: {
+        name: r.payeeName,
+        reference: r.reference ?? r.businessType ?? r.type,
+      },
+    };
+  });
+
+  // Most recent first for display.
+  items.reverse();
+  return res.json(items);
+});
 
 const KNOWN_TYPES = new Set([
   "Contactless Payment",

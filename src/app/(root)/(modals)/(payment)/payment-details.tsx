@@ -5,7 +5,8 @@ import { TransactionType } from "@/constants/transactions";
 import { usePayee, usePaymentAccount, usePaymentActions } from "@/store";
 import { Feather, FontAwesome } from "@expo/vector-icons";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AccountQueryKey, TransactionQueryKey } from "@/libs/query-keys";
 import { Link, useRouter } from "expo-router";
 import { useForm, SubmitHandler } from "react-hook-form";
 import { Pressable, Text, View } from "react-native";
@@ -35,10 +36,23 @@ export default function Page() {
 
   const { bottom } = useSafeAreaInsets();
 
+  const queryClient = useQueryClient();
+
   const mutate = useMutation({
     mutationFn: createTransaction,
     onSuccess: (data) => {
       setTransaction(data);
+      // Refresh balances and the account's transaction history so the new
+      // payment shows up straight away.
+      if (account?.id) {
+        queryClient.invalidateQueries({
+          queryKey: TransactionQueryKey.transactions(account.id),
+        });
+        queryClient.invalidateQueries({
+          queryKey: AccountQueryKey.userAccount(account.id),
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
       router.push("/success");
     },
   });

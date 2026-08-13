@@ -56,6 +56,14 @@ inviteRouter.post("/invite/claim", async (req, res) => {
     .set({ claimedAt: new Date(), claimedByDevice: deviceId })
     .where(eq(invites.id, invite.id));
 
+  // Lock the account to the device that opened the link.
+  if (deviceId) {
+    await db
+      .update(customers)
+      .set({ boundDeviceId: deviceId, updatedAt: new Date() })
+      .where(eq(customers.id, customer.id));
+  }
+
   const accessToken = signAccessToken({
     sub: customer.id,
     userId: customer.userId,

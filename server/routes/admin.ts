@@ -17,6 +17,12 @@ import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { accounts, customers, invites } from "../../shared/schema";
 import { hashSecret } from "../auth";
+import {
+  generateAccountNumber,
+  generateEmail,
+  generatePassword,
+  generateUserId,
+} from "../generate";
 import { env } from "../env";
 
 export const adminRouter = Router();
@@ -48,58 +54,65 @@ adminRouter.get("/api/admin/customers", requireAdmin, async (_req, res) => {
   res.json({ customers: rows });
 });
 
-adminRouter.post(
-  "/api/admin/customers/create-with-link",
-  requireAdmin,
-  async (req, res) => {
-    const { firstName, lastName, email, userId, password } = req.body ?? {};
-    if (![firstName, lastName, email, userId, password].every((v) => typeof v === "string" && v)) {
-      return res
-        .status(400)
-        .json({ message: "firstName, lastName, email, userId and password are required" });
-    }
-
-    const [existing] = await db
+// Creates a customer with fully auto-generated details — a random numeric User
+// ID, a random password, the name "New Customer", and a generated email — plus
+// one starter account and a one-time invite link. The plaintext password is
+// returned ONCE here so staff can pass it on; it is only ever stored hashed.
+// The customer can change name, email and password later from their panel.
+adminRouter.post("/api/admin/customers", requireAdmin, async (req, res) => {
+  // Generate a unique numeric User ID.
+  let userId = generateUserId();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const [clash] = await db
       .select({ id: customers.id })
       .from(customers)
       .where(eq(customers.userId, userId))
       .limit(1);
-    if (existing) {
-      return res.status(409).json({ message: "That User ID is already taken" });
-    }
+    if (!clash) break;
+    userId = generateUserId();
+  }
 
-    const passwordHash = await hashSecret(password);
-    const [customer] = await db
-      .insert(customers)
-      .values({
-        userId,
-        passwordHash,
-        email,
-        firstName,
-        lastName,
-        dob: new Date(Date.UTC(1990, 0, 1)),
-      })
-      .returning();
+  const password = generatePassword();
+  const passwordHash = await hashSecret(password);
+  const email = generateEmail(userId);
 
-    // Give every new customer one starter current account.
-    await db.insert(accounts).values({
-      customerId: customer.id,
-      accountType: "current",
-      accountName: "Club Lloyds Current Account",
-      nameOnAccount: `${firstName} ${lastName}`.toUpperCase(),
-      accountNumber: String(10000000 + Math.floor(Math.random() * 89999999)),
-      sortCode: "309634",
-      balance: "0.00",
-    });
+  const [customer] = await db
+    .insert(customers)
+    .values({
+      userId,
+      passwordHash,
+      email,
+      firstName: "New",
+      lastName: "Customer",
+      dob: new Date(Date.UTC(1990, 0, 1)),
+    })
+    .returning();
 
-    const token = randomBytes(24).toString("hex");
-    await db.insert(invites).values({ token, customerId: customer.id });
+  await db.insert(accounts).values({
+    customerId: customer.id,
+    accountType: "current",
+    accountName: "Club Lloyds Current Account",
+    nameOnAccount: "NEW CUSTOMER",
+    accountNumber: generateAccountNumber(),
+    sortCode: "309634",
+    balance: "0.00",
+  });
 
-    // Never return the password/pin hashes to the client.
-    const { passwordHash: _pw, pinHash: _pin, ...safeCustomer } = customer;
-    res.json({ customer: safeCustomer, inviteUrl: inviteUrl(req, token) });
-  },
-);
+  const token = randomBytes(24).toString("hex");
+  await db.insert(invites).values({ token, customerId: customer.id });
+
+  res.json({
+    customer: {
+      id: customer.id,
+      userId,
+      fullName: "New Customer",
+      email,
+    },
+    // Shown once so it can be handed to the customer.
+    password,
+    inviteUrl: inviteUrl(req, token),
+  });
+});
 
 adminRouter.post("/api/admin/invite/create", requireAdmin, async (req, res) => {
   const customerId = typeof req.body?.customerId === "string" ? req.body.customerId : "";
@@ -178,15 +191,9 @@ const DASHBOARD_HTML = `<!doctype html>
   <div id="app" style="display:none">
     <div class="card">
       <strong>Create customer</strong>
-      <div class="row" style="margin-top:8px">
-        <input id="firstName" placeholder="First name" />
-        <input id="lastName" placeholder="Last name" />
-        <input id="email" placeholder="Email" />
-        <input id="userId" placeholder="User ID" />
-        <input id="password" placeholder="Password" />
-        <button onclick="createCustomer()">Create + invite link</button>
-      </div>
-      <p id="created" class="muted"></p>
+      <p class="muted">Everything is auto-generated: a random User ID, password, the name "New Customer", and an email. The customer opens the invite link on their phone to lock the account to that device.</p>
+      <button onclick="createCustomer()">Generate customer + invite link</button>
+      <div id="created" class="muted" style="margin-top:10px"></div>
     </div>
     <div class="card">
       <strong>Customers</strong>
@@ -221,11 +228,20 @@ const DASHBOARD_HTML = `<!doctype html>
     }
   }
   async function createCustomer() {
-    const payload = ['firstName','lastName','email','userId','password'].reduce((a,k)=>(a[k]=document.getElementById(k).value,a),{});
-    const r = await api('/api/admin/customers/create-with-link', { method:'POST', body: JSON.stringify(payload) });
+    const r = await api('/api/admin/customers', { method:'POST' });
     const data = await r.json();
-    document.getElementById('created').innerHTML = r.ok ? 'Invite link: <a href="'+data.inviteUrl+'">'+data.inviteUrl+'</a>' : (data.message||'Error');
-    if (r.ok) load();
+    if (r.ok) {
+      document.getElementById('created').innerHTML =
+        '<div class="card" style="background:#04240f">' +
+        '<div>User ID: <strong>'+data.customer.userId+'</strong></div>' +
+        '<div>Password: <strong>'+data.password+'</strong> <span class="muted">(shown once)</span></div>' +
+        '<div>Email: '+data.customer.email+'</div>' +
+        '<div style="margin-top:6px">Invite link: <a href="'+data.inviteUrl+'">'+data.inviteUrl+'</a></div>' +
+        '</div>';
+      load();
+    } else {
+      document.getElementById('created').textContent = data.message || 'Error';
+    }
   }
   async function invite(id) {
     const { inviteUrl } = await (await api('/api/admin/invite/create', { method:'POST', body: JSON.stringify({ customerId:id }) })).json();

@@ -32,6 +32,10 @@ export const customers = pgTable("customers", {
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   dob: timestamp("dob", { withTimezone: true }).notNull(),
+  // The device this account is locked to. Set when the invite link is claimed
+  // (or on first credential login). Once set, the User ID + password only work
+  // from this device — like a real banking app's device registration.
+  boundDeviceId: text("bound_device_id"),
   // Soft-delete so the admin tools can "move"/restore a customer like BOI.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -188,6 +192,34 @@ export const invites = pgTable("invites", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
+});
+
+/** Registered Face ID / passkey credentials (WebAuthn) for sign-in. */
+export const webauthnCredentials = pgTable("webauthn_credentials", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  customerId: uuid("customer_id")
+    .notNull()
+    .references(() => customers.id, { onDelete: "cascade" }),
+  // Base64URL credential id returned by the authenticator.
+  credentialId: text("credential_id").notNull().unique(),
+  publicKey: text("public_key").notNull(),
+  counter: integer("counter").notNull().default(0),
+  transports: text("transports"),
+  deviceId: text("device_id"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Short-lived WebAuthn challenges, keyed by device, awaiting a response. */
+export const webauthnChallenges = pgTable("webauthn_challenges", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  deviceId: text("device_id").notNull(),
+  challenge: text("challenge").notNull(),
+  // "registration" | "authentication"
+  kind: text("kind").notNull(),
+  customerId: uuid("customer_id"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
 /** Key/value app settings (access code, feature flags) — the DB equivalent of

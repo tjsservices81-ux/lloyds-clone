@@ -8,11 +8,134 @@
 import { Router } from "express";
 import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import { db } from "../db";
-import { accounts, customers, payees } from "../../shared/schema";
-import { requireAuth } from "../auth";
+import { accounts, customers, payees, transactions } from "../../shared/schema";
+import { hashSecret, requireAuth, verifySecret } from "../auth";
 import { serializeCurrentUser, serializePayee } from "../serializers";
+import { generateTransactions } from "../generate";
 
 export const usersRouter = Router();
+
+// Update the customer's display name and/or email. Login is unaffected — the
+// current tokens keep working, so the session persists.
+usersRouter.patch("/users/profile", requireAuth, async (req, res) => {
+  const updates: Partial<{ firstName: string; lastName: string; email: string }> = {};
+
+  if (typeof req.body?.name === "string" && req.body.name.trim()) {
+    const parts = req.body.name.trim().split(/\s+/);
+    updates.firstName = parts[0];
+    updates.lastName = parts.slice(1).join(" ") || "";
+  }
+  if (typeof req.body?.email === "string" && req.body.email.trim()) {
+    updates.email = req.body.email.trim();
+  }
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ message: "Nothing to update" });
+  }
+
+  const [customer] = await db
+    .update(customers)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(customers.id, req.customerId!))
+    .returning();
+
+  const accountRows = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(eq(accounts.customerId, customer.id));
+  return res.json(
+    serializeCurrentUser(customer, accountRows.map((r) => r.id)),
+  );
+});
+
+// Change the password. The session is intentionally NOT revoked, so the user
+// stays logged in on their device after changing it.
+usersRouter.post("/users/change-password", requireAuth, async (req, res) => {
+  const currentPassword =
+    typeof req.body?.currentPassword === "string" ? req.body.currentPassword : "";
+  const newPassword =
+    typeof req.body?.newPassword === "string" ? req.body.newPassword : "";
+
+  if (newPassword.length < 6) {
+    return res
+      .status(400)
+      .json({ message: "New password must be at least 6 characters" });
+  }
+
+  const [customer] = await db
+    .select()
+    .from(customers)
+    .where(eq(customers.id, req.customerId!))
+    .limit(1);
+  if (!customer) return res.status(404).json({ message: "User not found" });
+
+  // If a current password is supplied, it must match; allow omitting it so a
+  // customer who only has the auto-generated password can set their own.
+  if (currentPassword) {
+    const ok = await verifySecret(currentPassword, customer.passwordHash);
+    if (!ok) {
+      return res.status(403).json({ message: "Current password is incorrect" });
+    }
+  }
+
+  await db
+    .update(customers)
+    .set({ passwordHash: await hashSecret(newPassword), updatedAt: new Date() })
+    .where(eq(customers.id, customer.id));
+
+  return res.json({ ok: true });
+});
+
+// Generate random transaction history for an account between two dates, and
+// move the balance by the net so the history stays consistent with it.
+usersRouter.post(
+  "/users/accounts/:accountId/generate-transactions",
+  requireAuth,
+  async (req, res) => {
+    const [account] = await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.id, String(req.params.accountId)),
+          eq(accounts.customerId, req.customerId!),
+        ),
+      )
+      .limit(1);
+    if (!account) return res.status(404).json({ message: "Account not found" });
+
+    const from = new Date(req.body?.from);
+    const to = new Date(req.body?.to);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+      return res
+        .status(400)
+        .json({ message: "Provide a valid 'from' and 'to' date range" });
+    }
+    const count = Math.min(Math.max(Number(req.body?.count) || 15, 1), 100);
+
+    const generated = generateTransactions(from, to, count);
+    const net = generated.reduce((sum, t) => sum + Number.parseFloat(t.amount), 0);
+
+    await db.transaction(async (tx) => {
+      await tx.insert(transactions).values(
+        generated.map((t) => ({
+          accountId: account.id,
+          type: t.type,
+          amount: t.amount,
+          payeeName: t.payeeName,
+          reference: t.reference,
+          createdAt: t.createdAt,
+        })),
+      );
+      const newBalance = (Number.parseFloat(account.balance) + net).toFixed(2);
+      await tx
+        .update(accounts)
+        .set({ balance: newBalance, updatedAt: new Date() })
+        .where(eq(accounts.id, account.id));
+    });
+
+    return res.json({ ok: true, created: generated.length });
+  },
+);
 
 usersRouter.get("/users/me", requireAuth, async (req, res) => {
   const [customer] = await db

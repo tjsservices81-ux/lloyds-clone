@@ -41,6 +41,27 @@ sessionRouter.post("/session", async (req, res) => {
     return res.status(401).json({ message: "Invalid User ID or password" });
   }
 
+  // Device binding: the credentials only work from the phone the account is
+  // registered to. The invite claim (or the first login) sets that device.
+  const deviceId =
+    req.header("x-device-id") ||
+    (typeof req.body?.deviceId === "string" ? req.body.deviceId : "");
+
+  if (customer.boundDeviceId) {
+    if (!deviceId || deviceId !== customer.boundDeviceId) {
+      return res.status(403).json({
+        message:
+          "This account is registered to another device. Use the phone the invite link was opened on.",
+      });
+    }
+  } else if (deviceId) {
+    // First device to sign in claims the account.
+    await db
+      .update(customers)
+      .set({ boundDeviceId: deviceId, updatedAt: new Date() })
+      .where(eq(customers.id, customer.id));
+  }
+
   const accessToken = signAccessToken({
     sub: customer.id,
     userId: customer.userId,

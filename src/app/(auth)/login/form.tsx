@@ -8,6 +8,8 @@ import { type LoginForm, loginFormSchema } from "@/schema";
 import { useAuth } from "@/store";
 
 const Page = () => {
+  const savedUserId = useAuth((state) => state.savedUserId);
+
   const {
     control,
     handleSubmit,
@@ -16,8 +18,10 @@ const Page = () => {
     resolver: zodResolver(loginFormSchema),
     mode: "onChange",
     defaultValues: {
-      userId: "docren155",
-      password: "password",
+      // Persistent login: the User ID is remembered on this device, so the
+      // customer only needs to type their password.
+      userId: savedUserId ?? "",
+      password: "",
     },
   });
 
