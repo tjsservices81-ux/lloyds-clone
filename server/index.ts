@@ -19,6 +19,7 @@ import { chatRouter } from "./routes/chat";
 import { accessRouter } from "./routes/access";
 import { adminRouter } from "./routes/admin";
 import { inviteRouter } from "./routes/invite";
+import { webauthnRouter } from "./routes/webauthn";
 
 const app = express();
 app.disable("x-powered-by");
@@ -35,6 +36,7 @@ app.use("/api", transactionsRouter);
 app.use("/api", chatRouter);
 app.use("/api", accessRouter);
 app.use("/api", inviteRouter);
+app.use("/api", webauthnRouter);
 
 // Server-rendered staff pages (their own PIN gate, outside the SPA).
 app.use("/", adminRouter);

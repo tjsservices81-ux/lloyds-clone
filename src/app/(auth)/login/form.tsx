@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text, View } from "react-native";
 import { useForm, SubmitHandler } from "react-hook-form";
 import { Button, TextInput } from "@/components/ui";
+import { FaceIdSignIn } from "@/components/auth/FaceIdSignIn";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link } from "expo-router";
 import { type LoginForm, loginFormSchema } from "@/schema";
@@ -63,6 +64,7 @@ const Page = () => {
             size="lg"
             onPress={handleSubmit(onSubmit)}
           />
+          <FaceIdSignIn />
           <Link asChild href="/(auth)/forgot-password">
             <Button
               variant="link"

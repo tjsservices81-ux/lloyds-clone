@@ -20,13 +20,32 @@ More in the screenshot folder. [Screenshot](./screenshots/)
 ## Features
 
 - Authentication (JWT access + refresh tokens)
+- **Persistent, device-bound login** — the User ID is remembered on the device
+  and you only type your password; the credentials are locked to the phone that
+  opened the invite link (rejected elsewhere)
+- **Face ID sign-in** (WebAuthn passkey) as an alternative to the password
 - Real account balances stored in PostgreSQL
-- Sending money that actually moves the balance
+- Sending money that actually moves the balance and shows in transaction history
 - Create / list / delete payees
+- **Customer panel** — change name, email and password (staying signed in), set
+  up Face ID, and generate random transaction history between two dates
 - Card management
 - In-app support chat (Claude-powered, with a scripted fallback)
-- Staff admin dashboard: create customers, generate one-time invite links
+- Staff admin dashboard: auto-generate customers (random User ID + password,
+  "New Customer" name, generated email) and one-time invite links
 - One-time invite links and an access-code gate
+
+### Persistent login, device binding & Face ID
+
+- Customers are created from the admin dashboard with everything auto-generated.
+  The customer opens the invite link on their phone, which **locks the account
+  to that device**. From then on the User ID + password (or Face ID) only work
+  on that device.
+- The app remembers the User ID on the device and does not persist the session,
+  so it always reopens on the login screen with the User ID filled in — the
+  customer just types their password (or uses Face ID).
+- Face ID uses the WebAuthn platform authenticator, so it needs a secure context
+  (HTTPS in production, which Render provides; `localhost` also works in dev).
 
 ## Architecture
 
