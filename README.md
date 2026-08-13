@@ -1,6 +1,11 @@
 # Lloyds Clone
 
-This project is a clone of the Lloyds banking application, built using React Native and TypeScript. It includes various features such as authentication, creating a new payee, viewing account details, and making payments.
+This project is a clone of the Lloyds banking application. The UI is built with
+Expo / React Native (and runs on the web via React Native Web); it is backed by
+its own **Node + Express + PostgreSQL** API in this same repository. All banking
+data is **simulated** — no real bank, no real money.
+
+> This is a training/simulation app. Everything is fake data.
 
 ## Screenshots
 
@@ -14,90 +19,88 @@ More in the screenshot folder. [Screenshot](./screenshots/)
 
 ## Features
 
-- Authentiication
-- Create a new payee
-- View account details
-- Make payments
+- Authentication (JWT access + refresh tokens)
+- Real account balances stored in PostgreSQL
+- Sending money that actually moves the balance
+- Create / list / delete payees
 - Card management
+- In-app support chat (Claude-powered, with a scripted fallback)
+- Staff admin dashboard: create customers, generate one-time invite links
+- One-time invite links and an access-code gate
 
-## Technologies Used
+## Architecture
 
-- Expo
-- Expo Router
-- React Native
-- TypeScript
-- Nativewind
-- React Hook Form
-- Zod
-- Tanstack Query
-- Axios
-- TabView
+One repository, two halves, plus a shared database schema — the same
+single-service model the app deploys as:
+
+- `src/` — the Expo / React Native (Web) client
+- `server/` — the Express API and server-rendered admin pages
+- `shared/schema.ts` — the Drizzle ORM database schema used by the server
+
+In production, **one** Express process serves both the built web client and the
+`/api` on a single port. The client is same-origin, so it calls `/api` directly.
+
+### Technologies
+
+- **Client:** Expo, Expo Router, React Native / React Native Web, TypeScript,
+  NativeWind, React Hook Form, Zod, TanStack Query, Axios
+- **Server:** Node, Express, PostgreSQL, Drizzle ORM, JSON Web Tokens, bcrypt
 
 ## Getting started
 
 ### Prerequisites
 
-- Node.js
-- pnpm
-- Expo CLI
-- [Lloyds API Clone](https://github.com/amilmohd155/lloyds-clone-api)
+- Node.js 20+ and pnpm
+- A PostgreSQL database (local, Render, or Neon — the server auto-detects the
+  driver)
 
-#### API Express Project
-
-Check out this repo to run the express server. ([Express API](https://github.com/amilmohd155/lloyds-clone-api))
-
-#### Environment Variables
-
-To run this project, you will need to add the following environment variables to your .env file
-
-`EXPO_PUBLIC_API_URL` - http://localhost:1205 / http://IP:1205 where the express app mentioned above is running, if port was changed, make appropriate changes.
-
-### Installation
-
-1. Clone the repository:
-   ```sh
-   git clone https://github.com/your-username/lloyds-clone.git
-   ```
-2. Navigate to the project directory:
-   ```sh
-   cd lloyds-clone
-   ```
-3. Install dependencies:
-   ```sh
-   pnpm install
-   ```
-
-### Running the App
-
-1. Start the Expo development server:
-
-   ```sh
-   pnpm start
-   ```
-
-2. Use the Expo app on your mobile device or an emulator to scan the QR code and run the application.
-
-### Running in the browser
+### 1. Install and configure
 
 ```sh
-pnpm web
+pnpm install
+cp .env.example .env          # then set DATABASE_URL (and JWT_SECRET)
 ```
+
+### 2. Create the tables and seed demo data
+
+```sh
+pnpm db:push                  # create the tables from shared/schema.ts
+pnpm db:seed                  # optional; the server also seeds on first start
+```
+
+The seed creates a demo login:
+
+| User ID     | Password   |
+| ----------- | ---------- |
+| `docren155` | `password` |
+
+### 3. Run it
+
+The simplest way (mirrors production): build the web client, then start the
+server, which serves both the client and the API on one port.
+
+```sh
+pnpm build:web                # writes the web client to dist/
+pnpm dev:server               # API + client on http://localhost:5000
+```
+
+Open http://localhost:5000 and log in with the demo credentials.
+
+For native development, `pnpm start` (Expo) still works; point
+`EXPO_PUBLIC_API_URL` at your running server.
+
+### Staff dashboard
+
+Visit `/admin-oversight` and enter `ADMIN_PIN` (default `246810`) to create
+customers and generate invite links.
 
 ## Web build
 
-The app runs as a single-page web app (`web.output` is `single` in `app.json`).
-To produce a deployable build:
-
-```sh
-EXPO_PUBLIC_API_URL=https://your-api.example.com pnpm build:web
-```
-
-The static site is written to `dist/`. `EXPO_PUBLIC_API_URL` is inlined at
-**build** time, so it has to be set before the export runs, not at serve time.
-
-Because the server only ships one `index.html`, whatever hosts `dist/` must
-rewrite unknown paths to `/index.html`, otherwise deep links such as
-`/account/<id>` 404.
+The client is a single-page web app (`web.output` is `single` in `app.json`).
+`pnpm build:web` writes it to `dist/`, and the Express server serves that folder
+with an SPA fallback (so deep links such as `/account/<id>` resolve). For a
+same-origin deploy, `EXPO_PUBLIC_API_URL` is left empty so the client calls
+`/api` on its own host; it is inlined at **build** time, not read at runtime.
 
 ### Web-specific implementations
 
@@ -117,36 +120,52 @@ unaffected and keep using the original modules.
 Note that persisted auth tokens live in `localStorage` on web — the browser has
 no secure-storage equivalent of the iOS keychain / Android keystore.
 
+## Environment variables
+
+| Name                 | Purpose                                                                   |
+| -------------------- | ------------------------------------------------------------------------- |
+| `DATABASE_URL`       | **Required.** PostgreSQL connection string. The app won't start without it. |
+| `JWT_SECRET`         | Signs access tokens. Required in production; a dev fallback is used locally. |
+| `APP_ACCESS_CODE`    | Code for the access gate (`/api/check-access`). Default `LLOYDS777777`.   |
+| `ADMIN_PIN`          | PIN for the `/admin-oversight` staff dashboard. Default `246810`.         |
+| `ANTHROPIC_API_KEY`  | Optional. Enables the Claude-powered chat; scripted replies without it.   |
+| `ANTHROPIC_MODEL`    | Optional. Chat model id (default `claude-sonnet-5`).                       |
+| `EXPO_PUBLIC_API_URL`| Client → API base URL. Empty for a same-origin deploy. Baked in at build. |
+| `PORT`               | Port the server listens on (the host usually sets this).                  |
+
 ## Deploying to Render
 
-`render.yaml` is a Render blueprint that publishes the app as a static site:
-it installs with pnpm, runs `pnpm build:web`, serves `dist/`, and rewrites all
-routes to `/index.html`.
+`render.yaml` is a Render blueprint describing **one web service + a managed
+PostgreSQL database**. The web service builds the client, bundles the server,
+pushes the schema, and serves everything on one port.
 
 1. In Render, create a new **Blueprint** from this repository.
-2. Set `EXPO_PUBLIC_API_URL` when prompted (it is declared `sync: false`), e.g.
-   `https://lloyds-clone-api.onrender.com` — no trailing slash and no `/api`
-   suffix, the clients append that themselves.
-3. Deploy.
+2. When prompted, set `APP_ACCESS_CODE` and `ADMIN_PIN` (and optionally
+   `ANTHROPIC_API_KEY`). `DATABASE_URL` and `JWT_SECRET` are wired up
+   automatically by the blueprint.
+3. Deploy. On first boot the server seeds the demo customer.
 
-The API must be reachable from the browser, which adds two requirements the
-mobile app did not have:
+Notes:
 
-- **HTTPS** — a page served over HTTPS cannot call an `http://` API; browsers
-  block it as mixed content.
-- **CORS** — the API has to allow the Render site's origin, since the requests
-  are now cross-origin.
+- The bundled free PostgreSQL plan expires after ~30 days — switch the database
+  to a paid plan for anything long-lived.
+- Because the client and API are the same origin, there is **no CORS or mixed
+  content** to configure.
 
 ## Project Structure
 
-- `src/`: Contains the source code of the application
-  - `api/`: API calls and services
-  - `components/`: Reusable UI components
-  - `libs/`: Utility functions and libraries
-  - `schema/`: Form validation schemas
-  - `screens/`: Application screens
-  - `app/`: Main application logic and routing
-  - `web/`: Browser implementations of native-only modules
+- `src/`: the client
+  - `api/`: HTTP clients and API calls
+  - `components/`: reusable UI components
+  - `libs/`: utilities
+  - `schema/`: form + response validation schemas (Zod)
+  - `screens/`: application screens
+  - `app/`: routing (Expo Router)
+  - `web/`: browser implementations of native-only modules
+- `server/`: the Express API
+  - `routes/`: session, users, accounts, transactions, chat, admin, invite, access
+  - `db.ts`, `auth.ts`, `seed.ts`, `serializers.ts`, `index.ts`
+- `shared/schema.ts`: the Drizzle database schema
 
 ## License
 

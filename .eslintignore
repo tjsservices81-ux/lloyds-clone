@@ -1,4 +1,11 @@
-
 /.expo
 
 node_modules
+
+# Backend code has its own tsconfig/typecheck and Node globals; the Expo
+# ESLint config targets the React Native client.
+server
+shared
+drizzle.config.ts
+server-dist
+dist
